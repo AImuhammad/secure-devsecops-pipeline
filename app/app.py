@@ -5,6 +5,7 @@ app = Flask(__name__)
 
 VERSION = os.getenv("APP_VERSION", "1.0.0")
 ENVIRONMENT = os.getenv("APP_ENV", "development")
+PORT = int(os.getenv("PORT", "5001"))
 
 
 @app.route("/")
@@ -25,4 +26,4 @@ def health():
 
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000)
+    app.run(host="0.0.0.0", port=PORT)
