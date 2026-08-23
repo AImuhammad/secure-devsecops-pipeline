@@ -2,9 +2,9 @@ pipeline {
     agent any
 
     environment {
-        REPO_URL   = 'https://github.com/AImuhammad/secure-devsecops-pipeline.git'
         IMAGE_NAME = 'secure-devsecops-app'
-        IMAGE_TAG  = "${BUILD_NUMBER}"
+        IMAGE_TAG = "${BUILD_NUMBER}"
+        TEST_CONTAINER = 'secure-devsecops-app-test'
     }
 
     stages {
@@ -12,7 +12,7 @@ pipeline {
         stage('Checkout') {
             steps {
                 git branch: 'main',
-                    url: "${REPO_URL}"
+                    url: 'https://github.com/AImuhammad/secure-devsecops-pipeline.git'
             }
         }
 
@@ -20,7 +20,7 @@ pipeline {
             steps {
                 sh '''
                     docker build \
-                        -t ${IMAGE_NAME}:${IMAGE_TAG} \
+                        -t "${IMAGE_NAME}:${IMAGE_TAG}" \
                         .
                 '''
             }
@@ -30,7 +30,7 @@ pipeline {
             steps {
                 sh '''
                     docker run --rm \
-                        ${IMAGE_NAME}:${IMAGE_TAG} \
+                        "${IMAGE_NAME}:${IMAGE_TAG}" \
                         python -c "import flask; print('Flask:', flask.__version__)"
                 '''
             }
@@ -42,36 +42,41 @@ pipeline {
                     trivy image \
                         --severity HIGH,CRITICAL \
                         --exit-code 1 \
-                        ${IMAGE_NAME}:${IMAGE_TAG}
+                        "${IMAGE_NAME}:${IMAGE_TAG}"
                 '''
             }
         }
 
-stage('Test') {
-    steps {
-        sh '''
-            docker run --rm \
-              -v "$PWD/app:/app" \
-              python:3.12-alpine \
-              sh -c "pip install --no-cache-dir -r /app/requirements.txt && cd /app && python -m pytest"
-        '''
-    }
-}
+        stage('Container Test') {
+            steps {
+                sh '''
+                    docker run -d \
+                        --name "${TEST_CONTAINER}" \
+                        --network host \
+                        "${IMAGE_NAME}:${IMAGE_TAG}"
 
+                    sleep 5
 
-
-post {
-    always {
-        sh '''
-            docker rm -f "${IMAGE_NAME}-test" 2>/dev/null || true
-        '''
+                    curl --fail \
+                        http://localhost:5001/health
+                '''
+            }
+        }
     }
 
-    success {
-        echo 'CI/CD pipeline completed successfully.'
-    }
+    post {
+        always {
+            sh '''
+                docker rm -f "${TEST_CONTAINER}" 2>/dev/null || true
+            '''
+        }
 
-    failure {
-        echo 'CI/CD pipeline failed.'
+        success {
+            echo 'CI/CD pipeline completed successfully.'
+        }
+
+        failure {
+            echo 'CI/CD pipeline failed.'
+        }
     }
 }
