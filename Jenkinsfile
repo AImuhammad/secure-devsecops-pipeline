@@ -103,6 +103,34 @@ pipeline {
                 '''
             }
         }
+
+        stage('Push to Docker Hub') {
+            steps {
+                withCredentials([
+                    usernamePassword(
+                        credentialsId: 'dockerhub-credentials',
+                        usernameVariable: 'DOCKERHUB_USERNAME',
+                        passwordVariable: 'DOCKERHUB_TOKEN'
+                    )
+                ]) {
+                    sh '''
+                        set -e
+
+                        echo "$DOCKERHUB_TOKEN" | docker login \
+                            -u "$DOCKERHUB_USERNAME" \
+                            --password-stdin
+
+                        docker tag ${APP_NAME}:${IMAGE_TAG} \
+                            ${DOCKERHUB_USERNAME}/${APP_NAME}:${IMAGE_TAG}
+
+                        docker push \
+                            ${DOCKERHUB_USERNAME}/${APP_NAME}:${IMAGE_TAG}
+
+                        docker logout
+                    '''
+                }
+            }
+        }
     }
 
     post {
