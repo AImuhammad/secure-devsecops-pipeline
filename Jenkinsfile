@@ -2,9 +2,10 @@ pipeline {
     agent any
 
     environment {
-        IMAGE_NAME = 'secure-devsecops-app'
-        IMAGE_TAG = "${BUILD_NUMBER}"
-        TEST_CONTAINER = 'secure-devsecops-app-test'
+        IMAGE_NAME = "secure-devsecops-app"
+        IMAGE_TAG = "5"
+        CONTAINER_NAME = "secure-devsecops-app-test"
+        APP_PORT = "5001"
     }
 
     stages {
@@ -19,9 +20,7 @@ pipeline {
         stage('Build Docker Image') {
             steps {
                 sh '''
-                    docker build \
-                        -t "${IMAGE_NAME}:${IMAGE_TAG}" \
-                        .
+                    docker build -t ${IMAGE_NAME}:${IMAGE_TAG} .
                 '''
             }
         }
@@ -30,7 +29,7 @@ pipeline {
             steps {
                 sh '''
                     docker run --rm \
-                        "${IMAGE_NAME}:${IMAGE_TAG}" \
+                        ${IMAGE_NAME}:${IMAGE_TAG} \
                         python -c "import flask; print('Flask:', flask.__version__)"
                 '''
             }
@@ -42,7 +41,7 @@ pipeline {
                     trivy image \
                         --severity HIGH,CRITICAL \
                         --exit-code 1 \
-                        "${IMAGE_NAME}:${IMAGE_TAG}"
+                        ${IMAGE_NAME}:${IMAGE_TAG}
                 '''
             }
         }
@@ -50,15 +49,37 @@ pipeline {
         stage('Container Test') {
             steps {
                 sh '''
+                    set -e
+
+                    echo "Starting test container..."
+
+                    docker rm -f ${CONTAINER_NAME} 2>/dev/null || true
+
                     docker run -d \
-                        --name "${TEST_CONTAINER}" \
-                        --network host \
-                        "${IMAGE_NAME}:${IMAGE_TAG}"
+                        --name ${CONTAINER_NAME} \
+                        ${IMAGE_NAME}:${IMAGE_TAG}
+
+                    echo "Waiting for application to start..."
 
                     sleep 5
 
+                    echo "Getting container IP..."
+
+                    CONTAINER_IP=$(docker inspect \
+                        -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' \
+                        ${CONTAINER_NAME})
+
+                    echo "Container IP: ${CONTAINER_IP}"
+
+                    echo "Testing health endpoint..."
+
                     curl --fail \
-                        http://localhost:5001/health
+                        --retry 5 \
+                        --retry-delay 2 \
+                        http://${CONTAINER_IP}:${APP_PORT}/health
+
+                    echo ""
+                    echo "Container health check passed."
                 '''
             }
         }
@@ -67,7 +88,7 @@ pipeline {
     post {
         always {
             sh '''
-                docker rm -f "${TEST_CONTAINER}" 2>/dev/null || true
+                docker rm -f ${CONTAINER_NAME} 2>/dev/null || true
             '''
         }
 
