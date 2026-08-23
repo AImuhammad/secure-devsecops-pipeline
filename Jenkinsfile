@@ -2,10 +2,10 @@ pipeline {
     agent any
 
     environment {
-        IMAGE_NAME = "secure-devsecops-app"
-        IMAGE_TAG = "5"
-        CONTAINER_NAME = "secure-devsecops-app-test"
-        APP_PORT = "5001"
+        APP_NAME = 'secure-devsecops-app'
+        IMAGE_TAG = '5'
+        TEST_CONTAINER = 'secure-devsecops-app-test'
+        SONAR_PROJECT_KEY = 'secure-devsecops-app'
     }
 
     stages {
@@ -20,7 +20,7 @@ pipeline {
         stage('Build Docker Image') {
             steps {
                 sh '''
-                    docker build -t ${IMAGE_NAME}:${IMAGE_TAG} .
+                    docker build -t ${APP_NAME}:${IMAGE_TAG} .
                 '''
             }
         }
@@ -28,10 +28,31 @@ pipeline {
         stage('Application Test') {
             steps {
                 sh '''
-                    docker run --rm \
-                        ${IMAGE_NAME}:${IMAGE_TAG} \
-                        python -c "import flask; print('Flask:', flask.__version__)"
+                    docker run --rm ${APP_NAME}:${IMAGE_TAG} \
+                    python -c "import flask; print('Flask:', flask.__version__)"
                 '''
+            }
+        }
+
+        stage('SonarQube Analysis') {
+            steps {
+                withSonarQubeEnv('SonarQube') {
+                    sh '''
+                        sonar-scanner \
+                          -Dsonar.projectKey=${SONAR_PROJECT_KEY} \
+                          -Dsonar.projectName=${SONAR_PROJECT_KEY} \
+                          -Dsonar.sources=app \
+                          -Dsonar.host.url=http://sonarqube:9000
+                    '''
+                }
+            }
+        }
+
+        stage('Quality Gate') {
+            steps {
+                timeout(time: 5, unit: 'MINUTES') {
+                    waitForQualityGate abortPipeline: true
+                }
             }
         }
 
@@ -39,9 +60,9 @@ pipeline {
             steps {
                 sh '''
                     trivy image \
-                        --severity HIGH,CRITICAL \
-                        --exit-code 1 \
-                        ${IMAGE_NAME}:${IMAGE_TAG}
+                      --severity HIGH,CRITICAL \
+                      --exit-code 1 \
+                      ${APP_NAME}:${IMAGE_TAG}
                 '''
             }
         }
@@ -53,30 +74,29 @@ pipeline {
 
                     echo "Starting test container..."
 
-                    docker rm -f ${CONTAINER_NAME} 2>/dev/null || true
+                    docker rm -f ${TEST_CONTAINER} 2>/dev/null || true
 
                     docker run -d \
-                        --name ${CONTAINER_NAME} \
-                        ${IMAGE_NAME}:${IMAGE_TAG}
+                      --name ${TEST_CONTAINER} \
+                      ${APP_NAME}:${IMAGE_TAG}
 
                     echo "Waiting for application to start..."
-
                     sleep 5
 
                     echo "Getting container IP..."
 
                     CONTAINER_IP=$(docker inspect \
-                        -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' \
-                        ${CONTAINER_NAME})
+                      -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' \
+                      ${TEST_CONTAINER})
 
                     echo "Container IP: ${CONTAINER_IP}"
 
                     echo "Testing health endpoint..."
 
                     curl --fail \
-                        --retry 5 \
-                        --retry-delay 2 \
-                        http://${CONTAINER_IP}:${APP_PORT}/health
+                      --retry 5 \
+                      --retry-delay 2 \
+                      http://${CONTAINER_IP}:5001/health
 
                     echo ""
                     echo "Container health check passed."
@@ -88,7 +108,7 @@ pipeline {
     post {
         always {
             sh '''
-                docker rm -f ${CONTAINER_NAME} 2>/dev/null || true
+                docker rm -f ${TEST_CONTAINER} 2>/dev/null || true
             '''
         }
 
