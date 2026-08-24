@@ -17,19 +17,31 @@ pipeline {
             }
         }
 
-        stage('Build Docker Image') {
+        stage('Application Tests') {
             steps {
                 sh '''
-                    docker build -t ${APP_NAME}:${IMAGE_TAG} .
+                    set -e
+
+                    python3 -m venv .ci-venv
+                    . .ci-venv/bin/activate
+
+                    pip install --upgrade pip
+                    pip install -r app/requirements.txt
+                    pip install pytest
+
+                    PYTHONPATH=. pytest -v
+
+                    deactivate
+                    rm -rf .ci-venv
                 '''
             }
         }
 
-        stage('Application Test') {
+        stage('Build Docker Image') {
             steps {
                 sh '''
-                    docker run --rm ${APP_NAME}:${IMAGE_TAG} \
-                    python -c "import flask; print('Flask:', flask.__version__)"
+                    docker build \
+                      -t ${APP_NAME}:${IMAGE_TAG} .
                 '''
             }
         }
@@ -72,26 +84,20 @@ pipeline {
                 sh '''
                     set -e
 
-                    echo "Starting test container..."
-
                     docker rm -f ${TEST_CONTAINER} 2>/dev/null || true
 
                     docker run -d \
                       --name ${TEST_CONTAINER} \
                       ${APP_NAME}:${IMAGE_TAG}
 
-                    echo "Waiting for application to start..."
+                    echo "Waiting for application..."
                     sleep 5
-
-                    echo "Getting container IP..."
 
                     CONTAINER_IP=$(docker inspect \
                       -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' \
                       ${TEST_CONTAINER})
 
                     echo "Container IP: ${CONTAINER_IP}"
-
-                    echo "Testing health endpoint..."
 
                     curl --fail \
                       --retry 5 \
@@ -120,7 +126,8 @@ pipeline {
                             -u "$DOCKERHUB_USERNAME" \
                             --password-stdin
 
-                        docker tag ${APP_NAME}:${IMAGE_TAG} \
+                        docker tag \
+                            ${APP_NAME}:${IMAGE_TAG} \
                             ${DOCKERHUB_USERNAME}/${APP_NAME}:${IMAGE_TAG}
 
                         docker push \
@@ -137,15 +144,16 @@ pipeline {
         always {
             sh '''
                 docker rm -f ${TEST_CONTAINER} 2>/dev/null || true
+                rm -rf .ci-venv
             '''
         }
 
         success {
-            echo 'CI/CD pipeline completed successfully.'
+            echo 'Secure DevSecOps pipeline completed successfully.'
         }
 
         failure {
-            echo 'CI/CD pipeline failed.'
+            echo 'Secure DevSecOps pipeline failed.'
         }
     }
 }
